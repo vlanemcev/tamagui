@@ -19,7 +19,10 @@ export const useRootTheme = ({ fallback = 'light' }: { fallback?: ColorScheme } 
     // this seems to prevent hydration errors, but not always so if you remove it and it doesn't error
     // you may regress some peoples apps
     startTransition(() => {
-      setVal(val)
+      setVal((prev) => {
+        console.log('setting', prev, val)
+        return val
+      })
     })
   }, [])
 

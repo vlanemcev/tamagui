@@ -3,7 +3,7 @@ import { getDefaultLayout } from '@lib/getDefaultLayout'
 import { Community } from '@tamagui/site/components/HeroCommunity'
 import { FeaturesGrid } from '@tamagui/site/components/HeroFeaturesGrid'
 import { NextSeo } from 'next-seo'
-import { Circle, YStack } from 'tamagui'
+import { YStack } from 'tamagui'
 
 import { HeroBelow } from '../components/HeroBelow'
 import { HeroExampleAnimations } from '../components/HeroExampleAnimations'
@@ -18,15 +18,6 @@ import { HomeSection, SectionTinted, TintSection } from '../components/TintSecti
 import { getCompilationExamples } from '../lib/getCompilationExamples'
 
 export default function Home({ animationCode, compilationExamples }) {
-  return (
-    <Circle
-      debug="verbose"
-      animation="quick"
-      size={100}
-      bg="red"
-      enterStyle={{ y: -100, o: 0 }}
-    />
-  )
   return (
     <>
       <HomeGlow />

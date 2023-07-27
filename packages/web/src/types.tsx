@@ -1418,11 +1418,6 @@ type StaticConfigBase = StaticConfigPublic & {
   defaultVariants?: { [key: string]: any }
 
   /**
-   * Memoize the component
-   */
-  memo?: boolean
-
-  /**
    * By default if styled() doesn't recognize a parent Tamagui compoent or specific react-native views,
    * it will assume the passed in component only accepts style={} for react-native compatibility.
    * Setting `acceptsClassName: true` indicates Tamagui can pass in className props.
