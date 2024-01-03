@@ -4,11 +4,7 @@ import { getThemes } from '../config'
 import { THEME_CLASSNAME_PREFIX, THEME_NAME_SEPARATOR } from '../constants/constants'
 import { ColorScheme, ThemeParsed, ThemeProps } from '../types'
 
-type ThemeListener = (
-  name: string | null,
-  themeManager: ThemeManager,
-  forced: boolean
-) => void
+type ThemeListener = (name: string | null, themeManager: ThemeManager) => void
 
 export type SetActiveThemeProps = {
   className?: string
@@ -27,10 +23,13 @@ export type ThemeManagerState = {
   scheme?: ColorScheme
 }
 
+const runBeforeNextTick =
+  process.env.TAMAGUI_TARGET === 'native' ? (x) => x() : queueMicrotask
+
 const emptyState: ThemeManagerState = { name: '' }
 
 export function getHasThemeUpdatingProps(props: ThemeProps) {
-  return props.name || props.componentName || props.inverse || props.reset
+  return Boolean(props.name || props.componentName || props.inverse || props.reset)
 }
 
 let uid = 0
@@ -97,15 +96,9 @@ export class ThemeManager {
       this['_numChangeEventsSent']++
     }
     if (shouldNotify) {
-      if (process.env.TAMAGUI_TARGET === 'native') {
-        // native is way slower with queueMicrotask
+      runBeforeNextTick(() => {
         this.notify()
-      } else {
-        // web is way faster this way
-        queueMicrotask(() => {
-          this.notify()
-        })
-      }
+      })
     }
   }
 
@@ -151,8 +144,19 @@ export class ThemeManager {
     return this._allKeys
   }
 
-  notify(forced = false) {
-    this.themeListeners.forEach((cb) => cb(this.state.name, this, forced))
+  last = ''
+
+  notify(key = '') {
+    if (this.last === key) {
+      return
+    }
+    this.last = key
+    if (this.props.debug) {
+      console.groupCollapsed('notifying')
+      console.trace()
+      console.groupEnd()
+    }
+    this.themeListeners.forEach((cb) => cb(this.state.name, this))
   }
 
   onChangeTheme(cb: ThemeListener, debugId?: number) {

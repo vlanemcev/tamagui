@@ -3,10 +3,13 @@ import { ThemeManager, ThemeManagerState } from '../helpers/ThemeManager';
 import type { DebugProp, ThemeParsed, ThemeProps, UseThemeWithStateProps, VariableVal, VariableValGeneric } from '../types';
 export type ChangedThemeResponse = {
     state?: ThemeManagerState;
+    version: number;
     themeManager?: ThemeManager | null;
     isNewTheme: boolean;
     inversed?: null | boolean;
     mounted?: boolean;
+    didUpdate?: boolean;
+    key?: string;
 };
 export type ThemeGettable<Val> = Val & {
     /**

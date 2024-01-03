@@ -1,9 +1,19 @@
 import { isClient, isIos, isServer } from '@tamagui/constants'
-import { useContext, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  startTransition,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 
 import { getConfig } from '../config'
 import { Variable, getVariable } from '../createVariable'
 import { isEqualShallow } from '../helpers/createShallowSetState'
+import { objectIdentityKey } from '../helpers/objectIdentityKey'
 import {
   ThemeManager,
   ThemeManagerState,
@@ -21,12 +31,15 @@ import type {
 
 export type ChangedThemeResponse = {
   state?: ThemeManagerState
+  version: number
   themeManager?: ThemeManager | null
   isNewTheme: boolean
   // null = never been inversed
   // false = was inversed, now not
   inversed?: null | boolean
   mounted?: boolean
+  didUpdate?: boolean
+  key?: string
 }
 
 const emptyProps = { name: null }
@@ -271,10 +284,15 @@ export const useChangeThemeEffect = (
 ): ChangedThemeResponse => {
   const { disable } = props
 
+  const id = useId()
+
+  if (props.debug) console.warn('render', id, props)
+
   const parentManager = useContext(ThemeManagerContext)
 
   if ((!isRoot && !parentManager) || disable) {
     return {
+      version: 0,
       isNewTheme: false,
       state: parentManager?.state,
       themeManager: parentManager,
@@ -294,9 +312,10 @@ export const useChangeThemeEffect = (
   //   }
   // }
 
+  const key = objectIdentityKey(props)
   const [themeState, setThemeState] = useState<ChangedThemeResponse>(createState)
 
-  const { state, mounted, isNewTheme, themeManager, inversed } = themeState
+  const { state, mounted, isNewTheme, themeManager, inversed, version } = themeState
   const isInversingOnMount = Boolean(!themeState.mounted && props.inverse)
 
   function getShouldUpdateTheme(
@@ -318,78 +337,66 @@ export const useChangeThemeEffect = (
   }
 
   if (!isServer) {
-    // listen for parent change + notify children change
-    useEffect(() => {
-      if (!themeManager) return
-
-      // SSR safe inverse (because server can't know prefers scheme)
-      // could be done through fancy selectors like how we do prefers-media
-      // but may be a bit of explosion of selectors
-      if (props.inverse && !mounted) {
-        setThemeState((prev) => {
-          return createState({
-            ...prev,
-            mounted: true,
-          })
-        })
-        return
+    const update = (change?: Partial<ChangedThemeResponse>, force = false) => {
+      const next = createState(
+        {
+          ...themeState,
+          ...change,
+          key,
+        },
+        force
+      )
+      if (next !== themeState) {
+        setThemeState(next)
+        if (version > 0) {
+          themeManager?.notify(key)
+        }
       }
+    }
+
+    if (key !== themeState.key) {
+      if (getShouldUpdateTheme(parentManager)) {
+        update()
+      }
+    }
+
+    useEffect(() => {
+      if (!themeManager || !parentManager) return
 
       if (isNewTheme && themeManager) {
         activeThemeManagers.add(themeManager)
       }
 
-      if (isNewTheme || getShouldUpdateTheme(themeManager)) {
-        setThemeState(createState)
+      // SSR safe inverse (because server can't know prefers scheme)
+      // could be done through fancy selectors like how we do prefers-media
+      // but may be a bit of explosion of selectors
+      if (props.inverse && !mounted) {
+        update({
+          mounted: true,
+        })
+        return
       }
 
-      // for updateTheme/replaceTheme
-      const selfListenerDispose = themeManager.onChangeTheme((_a, _b, forced) => {
-        if (forced) {
-          setThemeState((prev) => createState(prev, true))
+      const disposeChangeListener = parentManager.onChangeTheme((name, manager) => {
+        const force =
+          shouldUpdate?.() ||
+          props.deopt || // this fixes themeable() not updating with the new fastSchemeChange setting
+          (process.env.TAMAGUI_TARGET === 'native'
+            ? props['disable-child-theme']
+            : undefined)
+
+        if (process.env.NODE_ENV === 'development' && props.debug) {
+          console.info(`🔸`, { themeManager, force, props, name, manager, keys })
         }
-      })
 
-      const disposeChangeListener = parentManager?.onChangeTheme(
-        (name, manager, forced) => {
-          const force =
-            forced ||
-            shouldUpdate?.() ||
-            props.deopt ||
-            // this fixes themeable() not updating with the new fastSchemeChange setting
-            (process.env.TAMAGUI_TARGET === 'native'
-              ? props['disable-child-theme']
-              : undefined)
+        update(themeState, force)
 
-          const shouldTryUpdate = force ?? Boolean(keys?.length || isNewTheme)
-
-          if (process.env.NODE_ENV === 'development' && props.debug === 'verbose') {
-            // prettier-ignore
-            console.info(` 🔸 onChange`, themeManager.id, { force, shouldTryUpdate, props, name, manager, keys, })
-          }
-
-          if (shouldTryUpdate) {
-            setThemeState((prev) => createState(prev, force))
-          }
-        },
-        themeManager.id
-      )
-
-      return () => {
-        selfListenerDispose()
-        disposeChangeListener?.()
-        activeThemeManagers.delete(themeManager)
-      }
-    }, [
-      themeManager,
-      parentManager,
-      isNewTheme,
-      props.componentName,
-      props.inverse,
-      props.name,
-      props.reset,
-      mounted,
-    ])
+        return () => {
+          activeThemeManagers.delete(themeManager)
+          disposeChangeListener()
+        }
+      }, themeManager.id)
+    }, [themeManager, parentManager])
 
     if (process.env.NODE_ENV === 'development' && props.debug !== 'profile') {
       useEffect(() => {
@@ -404,6 +411,7 @@ export const useChangeThemeEffect = (
 
   if (isInversingOnMount) {
     return {
+      version: 0,
       isNewTheme: false,
       inversed: false,
       themeManager: parentManager,
@@ -416,6 +424,7 @@ export const useChangeThemeEffect = (
   }
 
   return {
+    version: themeState.version,
     state,
     isNewTheme,
     inversed,
@@ -430,7 +439,11 @@ export const useChangeThemeEffect = (
     //  returns previous theme manager if no change
     let themeManager: ThemeManager = parentManager!
     let state: ThemeManagerState | undefined
+    let didUpdate = false
     const hasThemeUpdatingProps = getHasThemeUpdatingProps(props)
+
+    // if (props.debug)
+    //   console.log('start createState', id, themeManager.id, props, hasThemeUpdatingProps)
 
     if (hasThemeUpdatingProps) {
       const getNewThemeManager = () => {
@@ -455,13 +468,15 @@ export const useChangeThemeEffect = (
           forceChange
         )
 
+        // if (props.debug) console.log('go!', { props, nextState, forceChange, next })
+
         if (nextState) {
           state = nextState
-
           if (!prev.isNewTheme) {
             themeManager = getNewThemeManager()
           } else {
-            themeManager.updateState(nextState)
+            didUpdate = true
+            themeManager.updateState(nextState, false)
           }
         } else {
           if (prev.isNewTheme) {
@@ -493,16 +508,19 @@ export const useChangeThemeEffect = (
 
     const wasInversed = prev?.inversed
     const nextInversed = isNewTheme && state.scheme !== parentManager?.state.scheme
-    const inversed = nextInversed ? true : wasInversed ? false : null
+    const inversed = nextInversed ? true : wasInversed != null ? false : null
 
+    // @ts-expect-error we set version below
     const response: ChangedThemeResponse = {
       themeManager,
       isNewTheme,
       mounted,
       inversed,
+      didUpdate,
     }
 
     const shouldReturnPrev =
+      !didUpdate &&
       !force &&
       prev &&
       // isEqualShallow uses the second arg as the keys so this should compare without state first...
@@ -514,7 +532,9 @@ export const useChangeThemeEffect = (
       return prev
     }
 
-    // after we compare equal we set the state
+    // after we compare equal we set the state that doesn't care about being different
+    response.key = key
+    response.version = (prev?.version ?? -1) + 1
     response.state = state
 
     if (process.env.NODE_ENV === 'development' && props['debug'] && isClient) {
