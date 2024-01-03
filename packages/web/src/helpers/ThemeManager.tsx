@@ -147,10 +147,10 @@ export class ThemeManager {
   last = ''
 
   notify(key = '') {
-    if (this.last === key) {
-      return
-    }
-    this.last = key
+    // if (this.last === key) {
+    //   return
+    // }
+    // this.last = key
     if (this.props.debug) {
       console.groupCollapsed('notifying')
       console.trace()

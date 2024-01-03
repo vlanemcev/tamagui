@@ -42,6 +42,8 @@ export type ChangedThemeResponse = {
   key?: string
 }
 
+type CreateStateProps = UseThemeWithStateProps & { mounted?: boolean }
+
 const emptyProps = { name: null }
 
 let cached: any
@@ -313,12 +315,15 @@ export const useChangeThemeEffect = (
   // }
 
   const key = objectIdentityKey(props)
-  const [themeState, setThemeState] = useState<ChangedThemeResponse>(createState)
+  const [themeState, setThemeState] = useState<ChangedThemeResponse>(() =>
+    createState(props)
+  )
 
   const { state, mounted, isNewTheme, themeManager, inversed, version } = themeState
   const isInversingOnMount = Boolean(!themeState.mounted && props.inverse)
 
   function getShouldUpdateTheme(
+    props: CreateStateProps,
     manager = themeManager,
     nextState?: ThemeManagerState | null,
     prevState: ThemeManagerState | undefined = state,
@@ -337,26 +342,16 @@ export const useChangeThemeEffect = (
   }
 
   if (!isServer) {
-    const update = (change?: Partial<ChangedThemeResponse>, force = false) => {
-      const next = createState(
-        {
-          ...themeState,
-          ...change,
-          key,
-        },
-        force
-      )
-      if (next !== themeState) {
-        setThemeState(next)
-        if (version > 0) {
-          themeManager?.notify(key)
-        }
-      }
+    const update = (change: CreateStateProps, force = false) => {
+      setThemeState((prev) => {
+        return createState(change, prev, force)
+      })
     }
 
-    if (key !== themeState.key) {
-      if (getShouldUpdateTheme(parentManager)) {
-        update()
+    const hasNewKey = key !== themeState.key
+    if (hasNewKey) {
+      if (getShouldUpdateTheme(props, parentManager)) {
+        update(props)
       }
     }
 
@@ -372,9 +367,14 @@ export const useChangeThemeEffect = (
       // but may be a bit of explosion of selectors
       if (props.inverse && !mounted) {
         update({
+          ...props,
           mounted: true,
         })
         return
+      }
+
+      if (version > 0) {
+        themeManager?.notify(key)
       }
 
       const disposeChangeListener = parentManager.onChangeTheme((name, manager) => {
@@ -389,14 +389,14 @@ export const useChangeThemeEffect = (
           console.info(`🔸`, { themeManager, force, props, name, manager, keys })
         }
 
-        update(themeState, force)
+        update(props, force)
 
         return () => {
           activeThemeManagers.delete(themeManager)
           disposeChangeListener()
         }
       }, themeManager.id)
-    }, [themeManager, parentManager])
+    }, [key])
 
     if (process.env.NODE_ENV === 'development' && props.debug !== 'profile') {
       useEffect(() => {
@@ -431,7 +431,11 @@ export const useChangeThemeEffect = (
     themeManager,
   }
 
-  function createState(prev?: ChangedThemeResponse, force = false): ChangedThemeResponse {
+  function createState(
+    props: CreateStateProps,
+    prev?: ChangedThemeResponse,
+    force = false
+  ): ChangedThemeResponse {
     if (prev && shouldUpdate?.() === false && !force) {
       return prev
     }
@@ -462,6 +466,7 @@ export const useChangeThemeEffect = (
         const forceChange = force || Boolean(keys?.length)
         const next = themeManager.getState(props, parentManager)
         const nextState = getShouldUpdateTheme(
+          props,
           themeManager,
           next,
           prev.state,
@@ -495,7 +500,7 @@ export const useChangeThemeEffect = (
     const isNewTheme = Boolean(themeManager !== parentManager || props.inverse)
 
     // only inverse relies on this for ssr
-    const mounted = !props.inverse ? true : isRoot || prev?.mounted
+    const mounted = !props.inverse ? true : isRoot || (props.mounted ?? prev?.mounted)
 
     if (!state) {
       if (isNewTheme) {
